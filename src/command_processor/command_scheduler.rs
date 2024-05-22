@@ -9,15 +9,17 @@ pub fn listen(command_queue: Arc<Mutex<Vec<AdaCommand>>>) {
         loop {
             {
                 let mut queue = command_queue.lock().unwrap();
-                if queue.len() > 0 {
+                if queue.len() > 0 { log::info!("Working on {} queued commands", queue.len()); }
+                while queue.len() > 0 {
                     let next_command = queue.pop();
                     if next_command.is_some() {
-                        log::info!("Got command {}", next_command.unwrap())
+                        let command = next_command.unwrap();
+                        log::debug!("Handle command {:?} with data [{:?}]", command.header, command.data)
                     }
                 }
             }
 
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(Duration::from_millis(1000));
         }
     });
 

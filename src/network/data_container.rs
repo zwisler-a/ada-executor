@@ -65,7 +65,7 @@ impl Container {
             match value {
                 Data::Integer(_) => size += 4,
                 Data::Float(_) => size += 8,
-                Data::Text(_) => (), // Text data is already included in the key
+                Data::Text(value) =>  size += value.len() + 1,
                 Data::Boolean(_) => size += 1,
                 _ => log::warn!("Unknown data type encountered, skipping value"),
             }
@@ -92,7 +92,11 @@ impl Container {
             match value {
                 Data::Integer(i) => buffer.extend_from_slice(&i.to_be_bytes()),
                 Data::Float(f) => buffer.extend_from_slice(&f.to_be_bytes()),
-                Data::Text(_) => (), // Text data is already included in the key
+                Data::Text(text) => {
+                    let mut bytes = text.as_bytes().to_vec();
+                    bytes.push(0);
+                    buffer.extend_from_slice(&bytes);
+                }
                 Data::Boolean(b) => buffer.push(if *b { 1 } else { 0 }),
                 _ => log::warn!("Unknown data type encountered, skipping value"),
             }

@@ -1,9 +1,10 @@
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::protocol::commands::AdaCommand;
+use crate::protocol::commands::{AdaCommand, COMMON_HEADER_SIZE};
 use crate::protocol::protocol_parser::{parse_data_container, parse_header};
 
 pub struct TcpServer {
@@ -20,28 +21,37 @@ impl TcpServer {
     }
 
     fn handle_client(queue: Arc<Mutex<Vec<AdaCommand>>>, mut stream: TcpStream) {
-        let mut buffer = [0; 6];
+        let mut buffer = [0; COMMON_HEADER_SIZE as usize];
         while match stream.read(&mut buffer) {
             Ok(size) if size > 0 => {
                 let header_opt = parse_header(&buffer[..size]);
                 if header_opt.is_some() {
                     let header = header_opt.unwrap();
+                    let mut command: AdaCommand = AdaCommand {
+                        header: header.clone(),
+                        data: None,
+                    };
                     log::debug!("Got command: {:?}", header);
-                    if header.content_length > 6 {
-                        let mut content_buffer = vec![0; (header.content_length - 6) as usize];
-                        let data = match stream.read(&mut content_buffer) {
+                    if header.content_length > COMMON_HEADER_SIZE {
+                        let mut content_buffer = vec![0; (header.content_length - COMMON_HEADER_SIZE) as usize];
+                        match stream.read(&mut content_buffer) {
                             Ok(_) => {
-                                parse_data_container(content_buffer, 0)
+                                command.data = parse_data_container(content_buffer, 0);
+                                log::debug!("Setting data {:?}", command.data);
                             }
-                            Err(_) => { None }
+                            Err(_) => {
+                                log::debug!("No data for the given command")
+                            }
                         };
-                        log::debug!("Got data {:?}", data);
                     }
+
+
+                    let mut collection = queue.lock().unwrap();
+                    log::debug!("Adding {} to queue", command);
+                    collection.push(command);
                 }
 
-                //let mut collection = queue.lock().unwrap();
-                //log::debug!("Adding {} to queue", header_opt);
-                //collection.push(header_opt);
+
                 true
             }
             Ok(_) => {

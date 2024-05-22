@@ -1,11 +1,11 @@
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use crate::network::data_container::{Container, Data};
-use crate::protocol::commands::{AdaCommandHeader, AdaCommandType};
+use crate::protocol::commands::{AdaCommandHeader, AdaCommandType, COMMON_HEADER_SIZE};
 
 
 pub fn parse_header(buffer: &[u8]) -> Option<AdaCommandHeader> {
-    if buffer.len() < 6 { // Check if buffer is at least 7 bytes long (header size)
+    if buffer.len() != COMMON_HEADER_SIZE as usize {
         return None;
     }
 
@@ -15,11 +15,21 @@ pub fn parse_header(buffer: &[u8]) -> Option<AdaCommandHeader> {
         Ok(t) => t,
         Err(_) => return None, // Invalid command type
     };
+    let network_id = match Uuid::from_slice(&buffer[6..22]) {
+        Ok(uuid) => uuid,
+        Err(_) => return None, // Invalid UUID
+    };
+    let node_id = match Uuid::from_slice(&buffer[22..38]) {
+        Ok(uuid) => uuid,
+        Err(_) => return None, // Invalid UUID
+    };
 
     Some(AdaCommandHeader {
         version,
         content_length,
         command_type,
+        node: Some(network_id),
+        network: Some(node_id),
     })
 }
 
@@ -59,6 +69,8 @@ pub fn parse_data_container(content_buffer: Vec<u8>, data_offset: usize) -> Opti
         });
         offset += key_len as usize;
 
+        log::debug!("Reading key {}", key);
+
         // Read data type byte
         let data_type = Data::try_from(content_buffer[offset]).unwrap();
 
@@ -68,7 +80,7 @@ pub fn parse_data_container(content_buffer: Vec<u8>, data_offset: usize) -> Opti
 
         // Parse data based on type
         let data = match data_type {
-            Data::Integer(i32) => {
+            Data::Integer(_) => {
                 // Integer (already handled by TryFrom)
                 if offset + 4 > content_buffer.len() {
                     return None; // Insufficient buffer for integer value
@@ -77,7 +89,7 @@ pub fn parse_data_container(content_buffer: Vec<u8>, data_offset: usize) -> Opti
                 offset += 4;
                 Some(Data::Integer(value))
             }
-            Data::Float(f64) => {
+            Data::Float(_) => {
                 // Float (already handled by TryFrom)
                 if offset + 8 > content_buffer.len() {
                     return None; // Insufficient buffer for float value
@@ -86,11 +98,21 @@ pub fn parse_data_container(content_buffer: Vec<u8>, data_offset: usize) -> Opti
                 offset += 8;
                 Some(Data::Float(value))
             }
-            Data::Text(String) => {
-                // Text (already extracted as string during key parsing)
-                Some(Data::Text("TODO".to_string()))
+            Data::Text(_) => {
+                let slice = &content_buffer[offset..];
+                let text = match slice.iter().position(|&b| b == 0) {
+                    Some(null_terminator) => Some(String::from_utf8_lossy(&slice[..null_terminator]).to_string()),
+                    None => Some(String::from_utf8_lossy(slice).to_string()),
+                };
+                match text {
+                    Some(val) => {
+                        offset += val.len() + 1;
+                        Some(Data::Text(val.to_string()))
+                    }
+                    None => None
+                }
             }
-            Data::Boolean(bool) => {
+            Data::Boolean(_) => {
                 // Boolean (already handled by TryFrom)
                 if offset + 1 > content_buffer.len() {
                     return None; // Insufficient buffer for boolean value
